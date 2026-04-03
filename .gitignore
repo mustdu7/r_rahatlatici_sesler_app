@@ -34,3 +34,9 @@ Podfile.lock
 
 # Archives
 *.xcarchive
+
+# Ses dosyaları (büyük binary — repo dışında tut)
+*.wav
+*.mp3
+*.aiff
+*.m4a
