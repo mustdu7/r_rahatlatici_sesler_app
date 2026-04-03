@@ -1,0 +1,36 @@
+# Xcode
+*.xcuserstate
+*.xcbkptlist
+xcuserdata/
+DerivedData/
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Xcode Schemes (sadece paylaşılanları tut)
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcworkspace/contents.xcworkspacedata
+
+# Build
+build/
+*.o
+*.d
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+
+# CocoaPods (kullanılmıyor ama yine de)
+Pods/
+Podfile.lock
+
+# SPM
+.build/
+*.resolved
+
+# Archives
+*.xcarchive
