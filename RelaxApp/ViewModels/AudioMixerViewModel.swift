@@ -274,7 +274,10 @@ class AudioMixerViewModel: ObservableObject {
         isPlaying = false
         fadeInTimer?.invalidate()
         fadeInTimer = nil
-        for playerNode in playerNodes.values { playerNode.pause() }
+        // stop() kullan: pause() buffer'ı kuyrukta bırakır, play() sonrası çift buffer → faz iptali
+        for playerNode in playerNodes.values { playerNode.stop() }
+        // Tüm mixer volume'ları sıfırla; play() fade-in ile temiz başlar
+        for mixerNode in mixerNodes.values { mixerNode.outputVolume = 0 }
         updateNowPlayingInfo()
         triggerMediumImpactHaptic()
     }
@@ -400,6 +403,8 @@ class AudioMixerViewModel: ObservableObject {
                            let buffer = self.audioBuffers[sound.id],
                            self.isPlaying && !playerNode.isPlaying {
                             await playerNode.scheduleBuffer(buffer, at: nil, options: .loops)
+                            // await sonrası nesil hâlâ geçerli mi?
+                            guard self.crossfadeGeneration == generation else { return }
                             playerNode.play()
                         }
                         mixerNode.outputVolume = Float(self.finalVolume(soundVolume: vol) * fade)
