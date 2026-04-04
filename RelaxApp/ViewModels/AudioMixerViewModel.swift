@@ -33,6 +33,10 @@ class AudioMixerViewModel: ObservableObject {
     private var countdownTimer: Timer?
     private var timerEndDate: Date?
 
+    // Stale Task'ları önlemek için nesil sayaçları
+    private var crossfadeGeneration = 0
+    private var fadeInGeneration    = 0
+
     // MARK: - Sabitler
 
     let crossfadeDuration: Double = 1.2
@@ -242,6 +246,8 @@ class AudioMixerViewModel: ObservableObject {
 
     private func startFadeIn() {
         fadeInTimer?.invalidate()
+        fadeInGeneration += 1
+        let generation   = fadeInGeneration
         let fadeInDuration = 2.0
         let steps = Int(fadeInDuration / animationStep)
         var step = 0
@@ -252,16 +258,14 @@ class AudioMixerViewModel: ObservableObject {
             let t = min(Double(step) / Double(steps), 1.0)
 
             Task { @MainActor [weak self] in
-                guard let self else { return }
+                guard let self, self.fadeInGeneration == generation else { return }
                 for sound in Sound.all {
                     guard let mixerNode = self.mixerNodes[sound.id] else { continue }
                     let state = self.soundMix.state(for: sound.id)
                     guard state.isEnabled else { continue }
                     mixerNode.outputVolume = Float(self.finalVolume(soundVolume: state.volume) * easeIn(t))
                 }
-                if t >= 1 {
-                    timer.invalidate()
-                }
+                if t >= 1 { timer.invalidate() }
             }
         }
     }
@@ -332,7 +336,13 @@ class AudioMixerViewModel: ObservableObject {
         guard id != selectedEnvironmentId,
               let targetEnv = AppEnvironment.environment(for: id) else { return }
 
+        // Tüm aktif timer'ları ve stale Task'ları iptal et
         crossfadeTimer?.invalidate()
+        crossfadeTimer = nil
+        fadeInTimer?.invalidate()
+        fadeInTimer = nil
+        crossfadeGeneration += 1
+        fadeInGeneration    += 1
 
         let oldMix = soundMix
         let newMix = defaultMix(for: targetEnv)
@@ -340,7 +350,18 @@ class AudioMixerViewModel: ObservableObject {
         selectedEnvironmentId = id
         soundMix = newMix
 
-        crossfade(from: oldMix, to: newMix)
+        // Yeni mixes'te olmayan sesleri hemen durdur
+        for sound in Sound.all {
+            let wasEnabled  = oldMix[sound.id]?.isEnabled ?? false
+            let willEnabled = newMix[sound.id]?.isEnabled ?? false
+            if wasEnabled && !willEnabled {
+                mixerNodes[sound.id]?.outputVolume = 0
+                playerNodes[sound.id]?.stop()
+            }
+        }
+
+        if isPlaying { crossfade(from: oldMix, to: newMix) }
+
         updateNowPlayingInfo()
         WidgetService.saveFavorite(activeEnvironment)
         triggerSoftImpactHaptic()
@@ -349,6 +370,8 @@ class AudioMixerViewModel: ObservableObject {
     // MARK: - Crossfade
 
     private func crossfade(from oldMix: MixMap, to newMix: MixMap) {
+        crossfadeGeneration += 1
+        let generation = crossfadeGeneration
         let steps = Int(crossfadeDuration / animationStep)
         var step  = 0
 
@@ -359,7 +382,8 @@ class AudioMixerViewModel: ObservableObject {
             let clampedT = min(Double(step) / Double(steps), 1.0)
 
             Task { @MainActor [weak self] in
-                guard let self else { return }
+                // Nesil uyuşmuyorsa bu timer artık geçersiz — sessizce çık
+                guard let self, self.crossfadeGeneration == generation else { return }
 
                 for sound in Sound.all {
                     guard let mixerNode = self.mixerNodes[sound.id] else { continue }
@@ -367,13 +391,8 @@ class AudioMixerViewModel: ObservableObject {
                     let isEnabled  = newMix[sound.id]?.isEnabled ?? false
 
                     if wasEnabled && !isEnabled {
-                        let fade = 1.0 - easeOut(clampedT)
-                        let vol  = oldMix[sound.id]?.volume ?? 0
-                        mixerNode.outputVolume = Float(self.finalVolume(soundVolume: vol) * fade)
-                        if clampedT >= 1 {
-                            mixerNode.outputVolume = 0
-                            self.playerNodes[sound.id]?.stop()
-                        }
+                        // Eski ses zaten stop() edildi; volume'u 0'da tut
+                        mixerNode.outputVolume = 0
                     } else if !wasEnabled && isEnabled {
                         let fade = easeIn(clampedT)
                         let vol  = newMix[sound.id]?.volume ?? 0
@@ -387,7 +406,7 @@ class AudioMixerViewModel: ObservableObject {
                     } else if wasEnabled && isEnabled {
                         let oldVol = oldMix[sound.id]?.volume ?? 0
                         let newVol = newMix[sound.id]?.volume ?? 0
-                        let vol = oldVol + (newVol - oldVol) * clampedT
+                        let vol    = oldVol + (newVol - oldVol) * clampedT
                         mixerNode.outputVolume = Float(self.finalVolume(soundVolume: vol))
                     }
                 }

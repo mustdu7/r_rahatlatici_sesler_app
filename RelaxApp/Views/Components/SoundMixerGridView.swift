@@ -77,12 +77,12 @@ private struct SoundCard: View {
                     .foregroundStyle(
                         state.isEnabled
                             ? AppColor.textPrimary
-                            : AppColor.textSecondary.opacity(0.5)
+                            : AppColor.textSecondary
                     )
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
-            .opacity(state.isEnabled ? 1.0 : 0.5)
+            .opacity(state.isEnabled ? 1.0 : 0.6)
 
             // Alt: Küçük slider
             VolumeSliderView(
