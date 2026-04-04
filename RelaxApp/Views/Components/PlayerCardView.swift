@@ -64,13 +64,21 @@ struct PlayerCardView: View {
                                 radius: vm.isPlaying ? 12 : 6, x: 0, y: 3
                             )
 
-                        Image(systemName: vm.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.system(size: 20, weight: .bold))
-                            .foregroundStyle(.white)
-                            .offset(x: vm.isPlaying ? 0 : 1)
+                        if vm.isAudioReady {
+                            Image(systemName: vm.isPlaying ? "pause.fill" : "play.fill")
+                                .font(.system(size: 20, weight: .bold))
+                                .foregroundStyle(.white)
+                                .offset(x: vm.isPlaying ? 0 : 1)
+                        } else {
+                            ProgressView()
+                                .tint(.white)
+                                .scaleEffect(0.8)
+                        }
                     }
                 }
+                .disabled(!vm.isAudioReady)
                 .animation(.spring(duration: 0.25), value: vm.isPlaying)
+                .animation(.easeInOut(duration: 0.2), value: vm.isAudioReady)
 
                 Color.clear.frame(width: 32, height: 32) // simetri
 

@@ -13,7 +13,7 @@ class AudioMixerViewModel: ObservableObject {
 
     @Published var selectedEnvironmentId: String = "rainy-window"
     @Published var soundMix: MixMap = [:]
-    @Published var masterVolume: Double = 80
+    @Published var masterVolume: Double = 55
     @Published var isPlaying: Bool = false
     @Published var isMuted: Bool = false
     @Published var isAudioReady: Bool = false
@@ -31,7 +31,11 @@ class AudioMixerViewModel: ObservableObject {
     private var fadeInTimer: Timer?
     private var sleepTimer: Timer?
     private var countdownTimer: Timer?
+    private var nowPlayingTimer: Timer?       // elapsed time günceller
     private var timerEndDate: Date?
+    private var playbackStartDate: Date?      // elapsed hesabı için
+    private var remoteCommandTokens: [Any] = []
+    private var artworkCache: [String: UIImage] = [:]   // envId → indirilen thumbnail
 
     // Stale Task'ları önlemek için nesil sayaçları
     private var crossfadeGeneration = 0
@@ -46,15 +50,14 @@ class AudioMixerViewModel: ObservableObject {
     // MARK: - Başlatma
 
     init() {
-        setupAudioSession()
-        preloadPlayers()
-        let firstEnv = AppEnvironment.all.first ?? AppEnvironment.all[0] // static data, never empty
+        let firstEnv = AppEnvironment.all[0]
         selectedEnvironmentId = firstEnv.id
         soundMix = defaultMix(for: firstEnv)
-        applyVolumes(animated: false)
-        isAudioReady = true
+        setupAudioSession()
         setupRemoteCommands()
         updateNowPlayingInfo()
+        // Dosya okuma background'da; UI hemen render edilir
+        Task { await preloadPlayers() }
     }
 
     deinit {
@@ -62,6 +65,7 @@ class AudioMixerViewModel: ObservableObject {
         fadeInTimer?.invalidate()
         sleepTimer?.invalidate()
         countdownTimer?.invalidate()
+        nowPlayingTimer?.invalidate()
         audioEngine.stop()
     }
 
@@ -117,47 +121,56 @@ class AudioMixerViewModel: ObservableObject {
 
     // MARK: - Player Ön Yükleme
 
-    private func preloadPlayers() {
+    private func preloadPlayers() async {
+        struct LoadedItem {
+            let id: SoundId
+            let buffer: AVAudioPCMBuffer
+        }
+
         let bundlePath = Bundle.main.bundlePath
         let fm = FileManager.default
+        let sounds = Sound.all
 
-        for sound in Sound.all {
-            let candidates = [
-                bundlePath + "/" + sound.audioFileName,
-                bundlePath + "/Audio/" + sound.audioFileName
-            ]
-            guard let filePath = candidates.first(where: { fm.fileExists(atPath: $0) }) else {
-                print("[preload] BULUNAMADI: \(sound.audioFileName)")
-                continue
+        // Dosya okuma — background thread (main'i bloke etmez)
+        let items: [LoadedItem] = await Task.detached(priority: .userInitiated) {
+            var results: [LoadedItem] = []
+            for sound in sounds {
+                let candidates = [
+                    bundlePath + "/" + sound.audioFileName,
+                    bundlePath + "/Audio/" + sound.audioFileName
+                ]
+                guard let filePath = candidates.first(where: { fm.fileExists(atPath: $0) }) else {
+                    print("[preload] BULUNAMADI: \(sound.audioFileName)")
+                    continue
+                }
+                do {
+                    let audioFile = try AVAudioFile(forReading: URL(fileURLWithPath: filePath))
+                    guard let buffer = AVAudioPCMBuffer(
+                        pcmFormat: audioFile.processingFormat,
+                        frameCapacity: AVAudioFrameCount(audioFile.length)
+                    ) else { continue }
+                    try audioFile.read(into: buffer)
+                    results.append(LoadedItem(id: sound.id, buffer: buffer))
+                    print("[preload] OK: \(sound.audioFileName)")
+                } catch {
+                    print("[preload] Hata (\(sound.audioFileName)): \(error)")
+                }
             }
+            return results
+        }.value
 
-            let fileURL = URL(fileURLWithPath: filePath)
-            do {
-                let audioFile = try AVAudioFile(forReading: fileURL)
-                guard let buffer = AVAudioPCMBuffer(
-                    pcmFormat: audioFile.processingFormat,
-                    frameCapacity: AVAudioFrameCount(audioFile.length)
-                ) else { continue }
-                try audioFile.read(into: buffer)
-
-                let playerNode = AVAudioPlayerNode()
-                let mixerNode  = AVAudioMixerNode()
-
-                audioEngine.attach(playerNode)
-                audioEngine.attach(mixerNode)
-                audioEngine.connect(playerNode, to: mixerNode, format: buffer.format)
-                audioEngine.connect(mixerNode, to: audioEngine.mainMixerNode, format: buffer.format)
-
-                mixerNode.outputVolume = 0
-
-                playerNodes[sound.id]  = playerNode
-                mixerNodes[sound.id]   = mixerNode
-                audioBuffers[sound.id] = buffer
-
-                print("[preload] OK: \(sound.audioFileName)")
-            } catch {
-                print("[preload] Hata (\(sound.audioFileName)): \(error)")
-            }
+        // Engine bağlantıları — main thread (AVAudioEngine gereksinimi)
+        for item in items {
+            let playerNode = AVAudioPlayerNode()
+            let mixerNode  = AVAudioMixerNode()
+            audioEngine.attach(playerNode)
+            audioEngine.attach(mixerNode)
+            audioEngine.connect(playerNode, to: mixerNode, format: item.buffer.format)
+            audioEngine.connect(mixerNode, to: audioEngine.mainMixerNode, format: item.buffer.format)
+            mixerNode.outputVolume = 0
+            playerNodes[item.id]  = playerNode
+            mixerNodes[item.id]   = mixerNode
+            audioBuffers[item.id] = item.buffer
         }
 
         print("[preload] Toplam player: \(playerNodes.count)/\(Sound.all.count)")
@@ -168,6 +181,10 @@ class AudioMixerViewModel: ObservableObject {
         } catch {
             print("[engine] Başlatma hatası: \(error)")
         }
+
+        isAudioReady = true
+        applyVolumes(animated: false)
+        updateNowPlayingInfo()
     }
 
     // MARK: - Remote Commands
@@ -175,23 +192,53 @@ class AudioMixerViewModel: ObservableObject {
     private func setupRemoteCommands() {
         let commandCenter = MPRemoteCommandCenter.shared()
 
+        // addTarget { } token'ları saklanmazsa handler anında deregister olur → widget görünmez
         commandCenter.playCommand.isEnabled = true
-        commandCenter.playCommand.addTarget { [weak self] _ in
-            Task { @MainActor in self?.play() }
+        let playToken = commandCenter.playCommand.addTarget { [weak self] _ in
+            MainActor.assumeIsolated { self?.play() }
             return .success
         }
 
         commandCenter.pauseCommand.isEnabled = true
-        commandCenter.pauseCommand.addTarget { [weak self] _ in
-            Task { @MainActor in self?.pause() }
+        let pauseToken = commandCenter.pauseCommand.addTarget { [weak self] _ in
+            MainActor.assumeIsolated { self?.pause() }
             return .success
         }
 
         commandCenter.togglePlayPauseCommand.isEnabled = true
-        commandCenter.togglePlayPauseCommand.addTarget { [weak self] _ in
-            Task { @MainActor in self?.togglePlay() }
+        let toggleToken = commandCenter.togglePlayPauseCommand.addTarget { [weak self] _ in
+            MainActor.assumeIsolated { self?.togglePlay() }
             return .success
         }
+
+        // Kilit ekranı "İleri / Geri" → ortam değiştirme
+        commandCenter.nextTrackCommand.isEnabled = true
+        let nextToken = commandCenter.nextTrackCommand.addTarget { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let envs = AppEnvironment.all
+                if let idx = envs.firstIndex(where: { $0.id == self.selectedEnvironmentId }),
+                   idx + 1 < envs.count {
+                    self.selectEnvironment(envs[idx + 1].id)
+                }
+            }
+            return .success
+        }
+
+        commandCenter.previousTrackCommand.isEnabled = true
+        let prevToken = commandCenter.previousTrackCommand.addTarget { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let envs = AppEnvironment.all
+                if let idx = envs.firstIndex(where: { $0.id == self.selectedEnvironmentId }),
+                   idx - 1 >= 0 {
+                    self.selectEnvironment(envs[idx - 1].id)
+                }
+            }
+            return .success
+        }
+
+        remoteCommandTokens = [playToken, pauseToken, toggleToken, nextToken, prevToken]
     }
 
     // MARK: - Hesaplanmış Özellikler
@@ -219,6 +266,7 @@ class AudioMixerViewModel: ObservableObject {
     func play() {
         guard isAudioReady else { return }
         isPlaying = true
+        playbackStartDate = Date()
 
         if !audioEngine.isRunning {
             try? audioEngine.start()
@@ -240,6 +288,7 @@ class AudioMixerViewModel: ObservableObject {
         }
 
         startFadeIn()
+        startNowPlayingTimer()
         updateNowPlayingInfo()
         triggerMediumImpactHaptic()
     }
@@ -253,12 +302,11 @@ class AudioMixerViewModel: ObservableObject {
         var step = 0
 
         fadeInTimer = Timer.scheduledTimer(withTimeInterval: animationStep, repeats: true) { [weak self] timer in
-            guard let self else { timer.invalidate(); return }
-            step += 1
-            let t = min(Double(step) / Double(steps), 1.0)
+            MainActor.assumeIsolated {
+                guard let self, self.fadeInGeneration == generation else { timer.invalidate(); return }
+                step += 1
+                let t = min(Double(step) / Double(steps), 1.0)
 
-            Task { @MainActor [weak self] in
-                guard let self, self.fadeInGeneration == generation else { return }
                 for sound in Sound.all {
                     guard let mixerNode = self.mixerNodes[sound.id] else { continue }
                     let state = self.soundMix.state(for: sound.id)
@@ -278,6 +326,8 @@ class AudioMixerViewModel: ObservableObject {
         isPlaying = false
         fadeInTimer?.invalidate()
         fadeInTimer = nil
+        nowPlayingTimer?.invalidate()
+        nowPlayingTimer = nil
         // stop() kullan: pause() buffer'ı kuyrukta bırakır, play() sonrası çift buffer → faz iptali
         for playerNode in playerNodes.values { playerNode.stop() }
         // Tüm mixer volume'ları sıfırla; play() fade-in ile temiz başlar
@@ -365,7 +415,10 @@ class AudioMixerViewModel: ObservableObject {
             playerNodes[sound.id]?.stop()
         }
 
-        if isPlaying { crossfade(from: oldMix, to: newMix) }
+        if isPlaying {
+            playbackStartDate = Date()   // yeni ortam → elapsed sıfırla
+            crossfade(from: oldMix, to: newMix)
+        }
 
         updateNowPlayingInfo()
         WidgetService.saveFavorite(activeEnvironment)
@@ -381,14 +434,11 @@ class AudioMixerViewModel: ObservableObject {
         var step  = 0
 
         crossfadeTimer = Timer.scheduledTimer(withTimeInterval: animationStep, repeats: true) { [weak self] timer in
-            guard let self else { timer.invalidate(); return }
+            MainActor.assumeIsolated {
+                guard let self, self.crossfadeGeneration == generation else { timer.invalidate(); return }
 
-            step += 1
-            let clampedT = min(Double(step) / Double(steps), 1.0)
-
-            Task { @MainActor [weak self] in
-                // Nesil uyuşmuyorsa bu timer artık geçersiz — sessizce çık
-                guard let self, self.crossfadeGeneration == generation else { return }
+                step += 1
+                let clampedT = min(Double(step) / Double(steps), 1.0)
 
                 for sound in Sound.all {
                     guard let mixerNode = self.mixerNodes[sound.id] else { continue }
@@ -396,19 +446,17 @@ class AudioMixerViewModel: ObservableObject {
                     let isEnabled  = newMix[sound.id]?.isEnabled ?? false
 
                     if wasEnabled && !isEnabled {
-                        // Eski ses zaten stop() edildi; volume'u 0'da tut
                         mixerNode.outputVolume = 0
                     } else if !wasEnabled && isEnabled {
-                        let fade = easeIn(clampedT)
-                        let vol  = newMix[sound.id]?.volume ?? 0
+                        // Senkron scheduleBuffer — .loops ile await asla dönmez
                         if let playerNode = self.playerNodes[sound.id],
                            let buffer = self.audioBuffers[sound.id],
                            self.isPlaying && !playerNode.isPlaying {
-                            await playerNode.scheduleBuffer(buffer, at: nil, options: .loops)
-                            // await sonrası nesil hâlâ geçerli mi?
-                            guard self.crossfadeGeneration == generation else { return }
+                            playerNode.scheduleBuffer(buffer, at: nil, options: .loops, completionHandler: nil)
                             playerNode.play()
                         }
+                        let fade = easeIn(clampedT)
+                        let vol  = newMix[sound.id]?.volume ?? 0
                         mixerNode.outputVolume = Float(self.finalVolume(soundVolume: vol) * fade)
                     } else if wasEnabled && isEnabled {
                         let oldVol = oldMix[sound.id]?.volume ?? 0
@@ -441,7 +489,7 @@ class AudioMixerViewModel: ObservableObject {
         }
 
         countdownTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
+            MainActor.assumeIsolated {
                 guard let self, let end = self.timerEndDate else { return }
                 let remaining = Int(end.timeIntervalSinceNow)
                 if remaining <= 0 {
@@ -474,12 +522,11 @@ class AudioMixerViewModel: ObservableObject {
         var step  = 0
 
         sleepTimer = Timer.scheduledTimer(withTimeInterval: animationStep, repeats: true) { [weak self] timer in
-            guard let self else { timer.invalidate(); return }
-            step += 1
-            let t = min(Double(step) / Double(steps), 1.0)
+            MainActor.assumeIsolated {
+                guard let self else { timer.invalidate(); return }
+                step += 1
+                let t = min(Double(step) / Double(steps), 1.0)
 
-            Task { @MainActor [weak self] in
-                guard let self else { return }
                 for sound in Sound.all {
                     guard let mixerNode = self.mixerNodes[sound.id] else { continue }
                     let state = self.soundMix.state(for: sound.id)
@@ -526,32 +573,59 @@ class AudioMixerViewModel: ObservableObject {
         return (soundVolume / 100.0) * (masterVolume / 100.0)
     }
 
-    // MARK: - Lock Screen / NowPlaying
+    // MARK: - Lock Screen / Now Playing
+
+    private func startNowPlayingTimer() {
+        nowPlayingTimer?.invalidate()
+        nowPlayingTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.isPlaying else { return }
+                // Sadece elapsed time güncelle; artwork/title'ı yeniden oluşturma
+                guard var info = MPNowPlayingInfoCenter.default().nowPlayingInfo else { return }
+                let elapsed = self.playbackStartDate.map { Date().timeIntervalSince($0) } ?? 0
+                info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = elapsed as NSNumber
+                MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+            }
+        }
+    }
 
     func updateNowPlayingInfo() {
         let env = activeEnvironment
-        let activeNames = Sound.all
-            .filter { soundMix.state(for: $0.id).isEnabled }
-            .map { $0.title }
-            .joined(separator: ", ")
+        let artworkSize = CGSize(width: 600, height: 600)
+        let elapsed = playbackStartDate.map { Date().timeIntervalSince($0) } ?? 0
 
-        let timerLabel = sleepTimerMinutes.map { formatMinutesLabel($0) } ?? "Sonsuz"
+        // Artwork: cache'li thumbnail → yoksa app icon fallback
+        let artworkImage: UIImage
+        if let cached = artworkCache[env.id] {
+            artworkImage = cached
+        } else {
+            artworkImage = UIImage(named: "NowPlayingArtwork") ?? UIImage()
+            Task { await fetchAndCacheArtwork(for: env) }
+        }
+        let artwork = MPMediaItemArtwork(boundsSize: artworkSize) { _ in artworkImage }
 
-        var info: [String: Any] = [
-            MPMediaItemPropertyTitle:             env.title,
-            MPMediaItemPropertyArtist:            "R: Rahatlatıcı Sesler",
-            MPMediaItemPropertyAlbumTitle:        activeNames.isEmpty ? "Sessizlik" : activeNames,
-            MPMediaItemPropertyAlbumArtist:       timerLabel,
-            MPNowPlayingInfoPropertyIsLiveStream: true as NSNumber,
-            MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? 1.0 as NSNumber : 0.0 as NSNumber
+        // duration: 3600 saniye sembolik → progress bar görünür; isLiveStream: false → "CANLI" yok
+        let info: [String: Any] = [
+            MPMediaItemPropertyTitle:                    env.title,
+            MPMediaItemPropertyArtist:                   "R: Rahatlatıcı Sesler",
+            MPMediaItemPropertyArtwork:                  artwork,
+            MPMediaItemPropertyPlaybackDuration:         3600.0 as NSNumber,
+            MPNowPlayingInfoPropertyElapsedPlaybackTime: elapsed as NSNumber,
+            MPNowPlayingInfoPropertyPlaybackRate:        isPlaying ? 1.0 as NSNumber : 0.0 as NSNumber,
+            MPNowPlayingInfoPropertyIsLiveStream:        false as NSNumber
         ]
 
-        if let uiImage = UIImage(named: "AppIcon") {
-            let artwork = MPMediaItemArtwork(boundsSize: uiImage.size) { _ in uiImage }
-            info[MPMediaItemPropertyArtwork] = artwork
-        }
-
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        MPNowPlayingInfoCenter.default().playbackState = isPlaying ? .playing : .paused
+    }
+
+    private func fetchAndCacheArtwork(for env: AppEnvironment) async {
+        guard artworkCache[env.id] == nil,
+              let url = URL(string: env.thumbnailUrl) else { return }
+        guard let (data, _) = try? await URLSession.shared.data(from: url),
+              let image = UIImage(data: data) else { return }
+        artworkCache[env.id] = image
+        if selectedEnvironmentId == env.id { updateNowPlayingInfo() }
     }
 }
 

@@ -34,83 +34,83 @@ func defaultMix(for environment: AppEnvironment) -> MixMap {
 private let mixOverrides: [String: MixMap] = [
 
     "rainy-window": [
-        .rain:        SoundMixState(isEnabled: true,  volume: 65),
-        .thunder:     SoundMixState(isEnabled: true,  volume: 28),
-        .wind:        SoundMixState(isEnabled: true,  volume: 22),
-        .tibetanBowl: SoundMixState(isEnabled: true,  volume: 18)
+        .rain:        SoundMixState(isEnabled: true,  volume: 55),
+        .thunder:     SoundMixState(isEnabled: true,  volume: 24),
+        .wind:        SoundMixState(isEnabled: true,  volume: 18),
+        .tibetanBowl: SoundMixState(isEnabled: true,  volume: 15)
     ],
 
     "deep-sleep": [
-        .rain:        SoundMixState(isEnabled: true,  volume: 45),
-        .whiteNoise:  SoundMixState(isEnabled: true,  volume: 52),
-        .tibetanBowl: SoundMixState(isEnabled: true,  volume: 22),
-        .wind:        SoundMixState(isEnabled: true,  volume: 20)
+        .rain:        SoundMixState(isEnabled: true,  volume: 38),
+        .whiteNoise:  SoundMixState(isEnabled: true,  volume: 44),
+        .tibetanBowl: SoundMixState(isEnabled: true,  volume: 18),
+        .wind:        SoundMixState(isEnabled: true,  volume: 17)
     ],
 
     "pond-night": [
-        .frogs:       SoundMixState(isEnabled: true,  volume: 52),
-        .crickets:    SoundMixState(isEnabled: true,  volume: 40),
-        .stream:      SoundMixState(isEnabled: true,  volume: 35),
-        .wind:        SoundMixState(isEnabled: true,  volume: 18)
-    ],
-
-    "night-sky": [
-        .wind:        SoundMixState(isEnabled: true,  volume: 28),
-        .tibetanBowl: SoundMixState(isEnabled: true,  volume: 38),
-        .whiteNoise:  SoundMixState(isEnabled: true,  volume: 25),
-        .rain:        SoundMixState(isEnabled: true,  volume: 20)
-    ],
-
-    "cozy-fireplace": [
-        .fire:        SoundMixState(isEnabled: true,  volume: 68),
-        .rain:        SoundMixState(isEnabled: true,  volume: 22),
+        .frogs:       SoundMixState(isEnabled: true,  volume: 44),
+        .crickets:    SoundMixState(isEnabled: true,  volume: 34),
+        .stream:      SoundMixState(isEnabled: true,  volume: 30),
         .wind:        SoundMixState(isEnabled: true,  volume: 15)
     ],
 
+    "night-sky": [
+        .wind:        SoundMixState(isEnabled: true,  volume: 24),
+        .tibetanBowl: SoundMixState(isEnabled: true,  volume: 32),
+        .whiteNoise:  SoundMixState(isEnabled: true,  volume: 21),
+        .rain:        SoundMixState(isEnabled: true,  volume: 17)
+    ],
+
+    "cozy-fireplace": [
+        .fire:        SoundMixState(isEnabled: true,  volume: 58),
+        .rain:        SoundMixState(isEnabled: true,  volume: 18),
+        .wind:        SoundMixState(isEnabled: true,  volume: 13)
+    ],
+
     "forest": [
-        .birds:       SoundMixState(isEnabled: true,  volume: 58),
-        .leaves:      SoundMixState(isEnabled: true,  volume: 45),
-        .stream:      SoundMixState(isEnabled: true,  volume: 38),
-        .wind:        SoundMixState(isEnabled: true,  volume: 25)
+        .birds:       SoundMixState(isEnabled: true,  volume: 49),
+        .leaves:      SoundMixState(isEnabled: true,  volume: 38),
+        .stream:      SoundMixState(isEnabled: true,  volume: 32),
+        .wind:        SoundMixState(isEnabled: true,  volume: 21)
     ],
 
     "peaceful-creek": [
-        .stream:      SoundMixState(isEnabled: true,  volume: 72),
-        .birds:       SoundMixState(isEnabled: true,  volume: 35),
-        .leaves:      SoundMixState(isEnabled: true,  volume: 28),
-        .frogs:       SoundMixState(isEnabled: true,  volume: 20)
+        .stream:      SoundMixState(isEnabled: true,  volume: 61),
+        .birds:       SoundMixState(isEnabled: true,  volume: 30),
+        .leaves:      SoundMixState(isEnabled: true,  volume: 24),
+        .frogs:       SoundMixState(isEnabled: true,  volume: 17)
     ],
 
     "summer-night": [
-        .crickets:    SoundMixState(isEnabled: true,  volume: 62),
-        .frogs:       SoundMixState(isEnabled: true,  volume: 40),
-        .wind:        SoundMixState(isEnabled: true,  volume: 22),
-        .stream:      SoundMixState(isEnabled: true,  volume: 25)
+        .crickets:    SoundMixState(isEnabled: true,  volume: 53),
+        .frogs:       SoundMixState(isEnabled: true,  volume: 34),
+        .wind:        SoundMixState(isEnabled: true,  volume: 18),
+        .stream:      SoundMixState(isEnabled: true,  volume: 21)
     ],
 
     "autumn-walk": [
-        .leaves:      SoundMixState(isEnabled: true,  volume: 65),
-        .wind:        SoundMixState(isEnabled: true,  volume: 40),
-        .birds:       SoundMixState(isEnabled: true,  volume: 25),
-        .rain:        SoundMixState(isEnabled: true,  volume: 18)
+        .leaves:      SoundMixState(isEnabled: true,  volume: 55),
+        .wind:        SoundMixState(isEnabled: true,  volume: 34),
+        .birds:       SoundMixState(isEnabled: true,  volume: 21),
+        .rain:        SoundMixState(isEnabled: true,  volume: 15)
     ],
 
     "ocean": [
-        .waves:       SoundMixState(isEnabled: true,  volume: 75),
-        .wind:        SoundMixState(isEnabled: true,  volume: 35)
+        .waves:       SoundMixState(isEnabled: true,  volume: 64),
+        .wind:        SoundMixState(isEnabled: true,  volume: 30)
         // Not: "seagulls" SoundId'de yok; waves ana ses
     ],
 
     "meditation": [
-        .tibetanBowl: SoundMixState(isEnabled: true,  volume: 58),
-        .brownNoise:  SoundMixState(isEnabled: true,  volume: 35),
-        .stream:      SoundMixState(isEnabled: true,  volume: 22)
+        .tibetanBowl: SoundMixState(isEnabled: true,  volume: 49),
+        .brownNoise:  SoundMixState(isEnabled: true,  volume: 30),
+        .stream:      SoundMixState(isEnabled: true,  volume: 18)
     ],
 
     "deep-focus": [
-        .brownNoise:  SoundMixState(isEnabled: true,  volume: 62),
-        .whiteNoise:  SoundMixState(isEnabled: true,  volume: 28),
-        .tibetanBowl: SoundMixState(isEnabled: true,  volume: 20)
+        .brownNoise:  SoundMixState(isEnabled: true,  volume: 53),
+        .whiteNoise:  SoundMixState(isEnabled: true,  volume: 24),
+        .tibetanBowl: SoundMixState(isEnabled: true,  volume: 17)
     ]
 ]
 
