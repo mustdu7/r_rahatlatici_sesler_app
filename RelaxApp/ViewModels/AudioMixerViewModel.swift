@@ -263,7 +263,11 @@ class AudioMixerViewModel: ObservableObject {
                     guard let mixerNode = self.mixerNodes[sound.id] else { continue }
                     let state = self.soundMix.state(for: sound.id)
                     guard state.isEnabled else { continue }
-                    mixerNode.outputVolume = Float(self.finalVolume(soundVolume: state.volume) * easeIn(t))
+                    // Yalnızca yükselt — toggleSound ile zaten açılmış sesleri düşürme
+                    let target = Float(self.finalVolume(soundVolume: state.volume) * easeIn(t))
+                    if target > mixerNode.outputVolume {
+                        mixerNode.outputVolume = target
+                    }
                 }
                 if t >= 1 { timer.invalidate() }
             }
@@ -312,10 +316,12 @@ class AudioMixerViewModel: ObservableObject {
               let mixerNode = mixerNodes[id] else { return }
 
         if state.isEnabled {
-            mixerNode.outputVolume = Float(finalVolume(soundVolume: state.volume))
-            if isPlaying && !playerNode.isPlaying {
+            if isPlaying {
+                // Engine çalışıyor: temiz başlat
+                if playerNode.isPlaying { playerNode.stop() }
                 playerNode.scheduleBuffer(buffer, at: nil, options: .loops, completionHandler: nil)
                 playerNode.play()
+                mixerNode.outputVolume = Float(finalVolume(soundVolume: state.volume))
             }
         } else {
             mixerNode.outputVolume = 0
@@ -353,14 +359,10 @@ class AudioMixerViewModel: ObservableObject {
         selectedEnvironmentId = id
         soundMix = newMix
 
-        // Yeni mixes'te olmayan sesleri hemen durdur
+        // Tüm çalan sesleri durdur ve mixer'ları temizle
         for sound in Sound.all {
-            let wasEnabled  = oldMix[sound.id]?.isEnabled ?? false
-            let willEnabled = newMix[sound.id]?.isEnabled ?? false
-            if wasEnabled && !willEnabled {
-                mixerNodes[sound.id]?.outputVolume = 0
-                playerNodes[sound.id]?.stop()
-            }
+            mixerNodes[sound.id]?.outputVolume = 0
+            playerNodes[sound.id]?.stop()
         }
 
         if isPlaying { crossfade(from: oldMix, to: newMix) }
